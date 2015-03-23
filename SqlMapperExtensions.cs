@@ -263,6 +263,17 @@ namespace Dapper.Contrib.Extensions
 			var columnList = GenerateColumnList<T>(allPropertiesExceptKeyAndComputed, adapter);
 			var parameterList = GenerateParameterList<T>(allPropertiesExceptKeyAndComputed);
 
+#if DEBUG
+			foreach (var key in keyProperties)
+			{
+				var value = key.GetValue(entityToInsert);
+				if (value is int && (int)value != 0)
+					throw new Exception("Trying to Insert but the [Id] is not 0");
+				else if (value is long && (long)value != 0L)
+					throw new Exception("Trying to Insert but the [Id] is not 0");
+			}
+#endif
+
 			int id = adapter.Insert(connection, transaction, commandTimeout, name, columnList, parameterList, keyProperties, entityToInsert);
 			return id;
 		}
@@ -312,6 +323,17 @@ namespace Dapper.Contrib.Extensions
 
 			var parentColumnList = GenerateColumnList<T>(parentAllPropertiesExceptKeyAndComputed, adapter);
 			var parentParameterList = GenerateParameterList<T>(parentAllPropertiesExceptKeyAndComputed);
+
+#if DEBUG
+			foreach (var key in parentKeyProperties)
+			{
+				var value = key.GetValue(entityToInsert);
+				if (value is int && (int)value != 0)
+					throw new Exception("Trying to Insert but the [Id] is not 0");
+				else if (value is long && (long)value != 0L)
+					throw new Exception("Trying to Insert but the [Id] is not 0");
+			}
+#endif
 
 			long id = adapter.Insert(connection, transaction, commandTimeout, parentName, parentColumnList, parentParameterList, parentKeyProperties, entityToInsert);
 
