@@ -133,6 +133,12 @@ namespace Dapper.Contrib.Extensions
 		public static T Get<T>(this IDbConnection connection, dynamic id, IDbTransaction transaction = null, int? commandTimeout = null) where T : class
 		{
 			var type = typeof(T);
+
+#if DEBUG
+			if (type.IsAbstract)
+				throw new Exception("It's really weird to insert an abstract class");
+#endif
+			
 			string sql;
 			if (!GetQueries.TryGetValue(type.TypeHandle, out sql))
 			{
@@ -235,6 +241,11 @@ namespace Dapper.Contrib.Extensions
 		public static long Insert<T>(this IDbConnection connection, T entityToInsert, IDbTransaction transaction = null, int? commandTimeout = null) where T : class
 		{
 			var type = typeof(T);
+
+#if DEBUG
+			if (type.IsAbstract)
+				throw new Exception("It's really weird to insert an abstract class");
+#endif
 
 			if (TypeIsTablePerType(type))
 				return TablePerTypeInsert(connection, entityToInsert, transaction, commandTimeout);
@@ -343,6 +354,11 @@ namespace Dapper.Contrib.Extensions
 
 			var type = typeof(T);
 
+#if DEBUG
+			if (type.IsAbstract)
+				throw new Exception("It's really weird to insert an abstract class");
+#endif
+
 			var res = PerformUpdate(connection, entityToUpdate, transaction, commandTimeout, type, adapter);
 
 			if (TypeIsTablePerType(type))
@@ -400,6 +416,11 @@ namespace Dapper.Contrib.Extensions
 				throw new ArgumentException("Cannot Delete null Object", "entityToDelete");
 
 			var type = typeof(T);
+
+#if DEBUG
+			if (type.IsAbstract)
+				throw new Exception("It's really weird to insert an abstract class");
+#endif
 
 			var res = PerformDelete(connection, entityToDelete, transaction, commandTimeout, type);
 
