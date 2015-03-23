@@ -21,10 +21,10 @@ namespace Dapper.Contrib.Extensions
 			bool IsDirty { get; set; }
 		}
 
-		private static readonly ConcurrentDictionary<RuntimeTypeHandle, IEnumerable<PropertyInfo>> KeyProperties = new ConcurrentDictionary<RuntimeTypeHandle, IEnumerable<PropertyInfo>>();
-		private static readonly ConcurrentDictionary<RuntimeTypeHandle, IEnumerable<PropertyInfo>> ManualKeyProperties = new ConcurrentDictionary<RuntimeTypeHandle, IEnumerable<PropertyInfo>>();
-		private static readonly ConcurrentDictionary<RuntimeTypeHandle, IEnumerable<PropertyInfo>> TypeProperties = new ConcurrentDictionary<RuntimeTypeHandle, IEnumerable<PropertyInfo>>();
-		private static readonly ConcurrentDictionary<RuntimeTypeHandle, IEnumerable<PropertyInfo>> ComputedProperties = new ConcurrentDictionary<RuntimeTypeHandle, IEnumerable<PropertyInfo>>();
+		private static readonly ConcurrentDictionary<RuntimeTypeHandle, PropertyInfo[]> KeyProperties = new ConcurrentDictionary<RuntimeTypeHandle, PropertyInfo[]>();
+		private static readonly ConcurrentDictionary<RuntimeTypeHandle, PropertyInfo[]> ManualKeyProperties = new ConcurrentDictionary<RuntimeTypeHandle, PropertyInfo[]>();
+		private static readonly ConcurrentDictionary<RuntimeTypeHandle, PropertyInfo[]> TypeProperties = new ConcurrentDictionary<RuntimeTypeHandle, PropertyInfo[]>();
+		private static readonly ConcurrentDictionary<RuntimeTypeHandle, PropertyInfo[]> ComputedProperties = new ConcurrentDictionary<RuntimeTypeHandle, PropertyInfo[]>();
 		private static readonly ConcurrentDictionary<RuntimeTypeHandle, string> GetQueries = new ConcurrentDictionary<RuntimeTypeHandle, string>();
 		private static readonly ConcurrentDictionary<RuntimeTypeHandle, string> TypeTableName = new ConcurrentDictionary<RuntimeTypeHandle, string>();
 
@@ -33,30 +33,30 @@ namespace Dapper.Contrib.Extensions
 																							{"npgsqlconnection", new PostgresAdapter()},
 																							{"sqliteconnection", new SQLiteAdapter()}
 																						};
-		private static IEnumerable<PropertyInfo> ComputedPropertiesCache(Type type)
+		private static PropertyInfo[] ComputedPropertiesCache(Type type)
 		{
-			IEnumerable<PropertyInfo> pi;
+			PropertyInfo[] pi;
 			if (ComputedProperties.TryGetValue(type.TypeHandle, out pi))
 			{
 				return pi;
 			}
 
-			var computedProperties = TypePropertiesCache(type).Where(p => p.GetCustomAttributes(true).Any(a => a is ComputedAttribute)).ToList();
+			var computedProperties = TypePropertiesCache(type).Where(p => p.GetCustomAttributes(true).Any(a => a is ComputedAttribute)).ToArray();
 
 			ComputedProperties[type.TypeHandle] = computedProperties;
 			return computedProperties;
 		}
-		private static IEnumerable<PropertyInfo> KeyPropertiesCache(Type type)
+		private static PropertyInfo[] KeyPropertiesCache(Type type)
 		{
 
-			IEnumerable<PropertyInfo> pi;
+			PropertyInfo[] pi;
 			if (KeyProperties.TryGetValue(type.TypeHandle, out pi))
 			{
 				return pi;
 			}
 
 			var allProperties = TypePropertiesCache(type);
-			var keyProperties = allProperties.Where(p => p.GetCustomAttributes(true).Any(a => a is KeyAttribute)).ToList();
+			var keyProperties = allProperties.Where(p => p.GetCustomAttributes(true).Any(a => a is KeyAttribute)).ToArray();
 
 			//if (keyProperties.Count == 0)
 			//{
@@ -70,17 +70,17 @@ namespace Dapper.Contrib.Extensions
 			KeyProperties[type.TypeHandle] = keyProperties;
 			return keyProperties;
 		}
-		private static IEnumerable<PropertyInfo> ManualKeyPropertiesCache(Type type)
+		private static PropertyInfo[] ManualKeyPropertiesCache(Type type)
 		{
 
-			IEnumerable<PropertyInfo> pi;
+			PropertyInfo[] pi;
 			if (ManualKeyProperties.TryGetValue(type.TypeHandle, out pi))
 			{
 				return pi;
 			}
 
 			var allProperties = TypePropertiesCache(type);
-			var keyProperties = allProperties.Where(p => p.GetCustomAttributes(true).Any(a => a is ManualKeyAttribute)).ToList();
+			var keyProperties = allProperties.Where(p => p.GetCustomAttributes(true).Any(a => a is ManualKeyAttribute)).ToArray();
 
 
 			ManualKeyProperties[type.TypeHandle] = keyProperties;
@@ -88,7 +88,7 @@ namespace Dapper.Contrib.Extensions
 		}
 		private static IEnumerable<PropertyInfo> TypePropertiesCache(Type type)
 		{
-			IEnumerable<PropertyInfo> pis;
+			PropertyInfo[] pis;
 			if (TypeProperties.TryGetValue(type.TypeHandle, out pis))
 			{
 				return pis;
