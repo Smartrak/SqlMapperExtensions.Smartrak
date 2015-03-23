@@ -27,6 +27,9 @@ namespace Dapper.Contrib.Extensions
 		private static readonly ConcurrentDictionary<RuntimeTypeHandle, PropertyInfo[]> ComputedProperties = new ConcurrentDictionary<RuntimeTypeHandle, PropertyInfo[]>();
 		private static readonly ConcurrentDictionary<RuntimeTypeHandle, string> GetQueries = new ConcurrentDictionary<RuntimeTypeHandle, string>();
 		private static readonly ConcurrentDictionary<RuntimeTypeHandle, string> TypeTableName = new ConcurrentDictionary<RuntimeTypeHandle, string>();
+		private static readonly ConcurrentDictionary<RuntimeTypeHandle, bool> TypeTableTablePerType = new ConcurrentDictionary<RuntimeTypeHandle, bool>();
+
+		private static readonly NameOnlyPropertyComparer PropertyComparer = new NameOnlyPropertyComparer();
 
 		private static readonly Dictionary<string, ISqlAdapter> AdapterDictionary = new Dictionary<string, ISqlAdapter>() {
 																							{"sqlconnection", new SqlServerAdapter()},
@@ -86,7 +89,8 @@ namespace Dapper.Contrib.Extensions
 			ManualKeyProperties[type.TypeHandle] = keyProperties;
 			return keyProperties;
 		}
-		private static IEnumerable<PropertyInfo> TypePropertiesCache(Type type)
+
+		private static PropertyInfo[] TypePropertiesCache(Type type)
 		{
 			PropertyInfo[] pis;
 			if (TypeProperties.TryGetValue(type.TypeHandle, out pis))
@@ -95,6 +99,13 @@ namespace Dapper.Contrib.Extensions
 			}
 
 			var properties = type.GetProperties().Where(IsWriteable).ToArray();
+
+			//Don't include fields from our parent class if we are TablePerType (Do include keys however!)
+			if (TypeIsTablePerType(type))
+			{
+				properties = properties.Except(TypePropertiesCache(type.BaseType), PropertyComparer).Concat(KeyPropertiesCache(type.BaseType)).Concat(ManualKeyPropertiesCache(type.BaseType)).ToArray();
+			}
+
 			TypeProperties[type.TypeHandle] = properties;
 			return properties;
 		}
@@ -135,16 +146,21 @@ namespace Dapper.Contrib.Extensions
 					if (keys.Count() > 1)
 						throw new DataException("Get<T> only supports an entity with a single [ManualKey] property");
 					if (keys.Count() == 0)
-						throw new DataException("Get<T> only supports en entity with a [Key] or [ManualKey] property");
+						throw new DataException("Get<T> only supports an entity with a [Key] or [ManualKey] property");
 				}
 
 				var onlyKey = keys.First();
 
-				var name = GetTableName(type);
+				var tableName = GetTableName(type);
+
+				if (TypeIsTablePerType(type))
+				{
+					tableName += " JOIN " + GetTableName(type.BaseType) + " USING (" + onlyKey.Name + ")";
+				}
 
 				// TODO: pluralizer 
 				// TODO: query information schema and only select fields that are both in information schema and underlying class / interface 
-				sql = "select * from " + name + " where " + onlyKey.Name + " = @id";
+				sql = "select * from " + tableName + " where " + onlyKey.Name + " = @id";
 				GetQueries[type.TypeHandle] = sql;
 			}
 
@@ -196,6 +212,20 @@ namespace Dapper.Contrib.Extensions
 			return name;
 		}
 
+
+		private static bool TypeIsTablePerType(Type type)
+		{
+			bool isTpt;
+			if (!TypeTableTablePerType.TryGetValue(type.TypeHandle, out isTpt))
+			{
+				//NOTE: This as dynamic trick should be able to handle both our own Table-attribute as well as the one in EntityFramework 
+				var tableattr = type.GetCustomAttributes(false).SingleOrDefault(attr => attr is TablePerTypeAttribute);
+				isTpt = tableattr != null;
+				TypeTableTablePerType[type.TypeHandle] = isTpt;
+			}
+			return isTpt;
+		}
+
 		/// <summary>
 		/// Inserts an entity into table "Ts" and returns identity id.
 		/// </summary>
@@ -204,36 +234,94 @@ namespace Dapper.Contrib.Extensions
 		/// <returns>Identity of inserted entity</returns>
 		public static long Insert<T>(this IDbConnection connection, T entityToInsert, IDbTransaction transaction = null, int? commandTimeout = null) where T : class
 		{
-			ISqlAdapter adapter = GetFormatter(connection);
-
 			var type = typeof(T);
+
+			if (TypeIsTablePerType(type))
+				return TablePerTypeInsert(connection, entityToInsert, transaction, commandTimeout);
+
+			ISqlAdapter adapter = GetFormatter(connection);
 
 			var name = GetTableName(type);
 
-			var sbColumnList = new StringBuilder(null);
 
 			var allProperties = TypePropertiesCache(type);
 			var keyProperties = KeyPropertiesCache(type);
 			var computedProperties = ComputedPropertiesCache(type);
-			var allPropertiesExceptKeyAndComputed = allProperties.Except(keyProperties.Union(computedProperties));
+			var allPropertiesExceptKeyAndComputed = allProperties.Except(keyProperties.Union(computedProperties)).ToArray();
 
-			for (var i = 0; i < allPropertiesExceptKeyAndComputed.Count(); i++)
-			{
-				var property = allPropertiesExceptKeyAndComputed.ElementAt(i);
-				sbColumnList.AppendFormat("{1}{0}{1}", property.Name, adapter.ColumnNameIndicator);
-				if (i < allPropertiesExceptKeyAndComputed.Count() - 1)
-					sbColumnList.Append(", ");
-			}
+			var columnList = GenerateColumnList<T>(allPropertiesExceptKeyAndComputed, adapter);
+			var parameterList = GenerateParameterList<T>(allPropertiesExceptKeyAndComputed);
 
+			int id = adapter.Insert(connection, transaction, commandTimeout, name, columnList, parameterList, keyProperties, entityToInsert);
+			return id;
+		}
+
+		private static string GenerateParameterList<T>(PropertyInfo[] allPropertiesExceptKeyAndComputed) where T : class
+		{
 			var sbParameterList = new StringBuilder(null);
-			for (var i = 0; i < allPropertiesExceptKeyAndComputed.Count(); i++)
+			for (var i = 0; i < allPropertiesExceptKeyAndComputed.Length; i++)
 			{
-				var property = allPropertiesExceptKeyAndComputed.ElementAt(i);
+				var property = allPropertiesExceptKeyAndComputed[i];
 				sbParameterList.AppendFormat("@{0}", property.Name);
-				if (i < allPropertiesExceptKeyAndComputed.Count() - 1)
+				if (i < allPropertiesExceptKeyAndComputed.Length - 1)
 					sbParameterList.Append(", ");
 			}
-			int id = adapter.Insert(connection, transaction, commandTimeout, name, sbColumnList.ToString(), sbParameterList.ToString(), keyProperties, entityToInsert);
+			var parameterList = sbParameterList.ToString();
+			return parameterList;
+		}
+
+		private static string GenerateColumnList<T>(PropertyInfo[] allPropertiesExceptKeyAndComputed, ISqlAdapter adapter) where T : class
+		{
+			var sbColumnList = new StringBuilder(null);
+			for (var i = 0; i < allPropertiesExceptKeyAndComputed.Length; i++)
+			{
+				var property = allPropertiesExceptKeyAndComputed[i];
+				sbColumnList.AppendFormat("{1}{0}{1}", property.Name, adapter.ColumnNameIndicator);
+				if (i < allPropertiesExceptKeyAndComputed.Length - 1)
+					sbColumnList.Append(", ");
+			}
+			var columnList = sbColumnList.ToString();
+			return columnList;
+		}
+
+		private static long TablePerTypeInsert<T>(IDbConnection connection, T entityToInsert, IDbTransaction transaction, int? commandTimeout) where T : class
+		{
+			var type = typeof(T);
+			var parentType = type.BaseType;
+
+			ISqlAdapter adapter = GetFormatter(connection);
+
+			#region Insert the parent class
+
+			var parentName = GetTableName(parentType);
+			var parentProperties = TypePropertiesCache(parentType);
+			var parentKeyProperties = KeyPropertiesCache(parentType);
+			var parentComputedProperties = ComputedPropertiesCache(parentType);
+			var parentAllPropertiesExceptKeyAndComputed = parentProperties.Except(parentKeyProperties.Union(parentComputedProperties)).ToArray();
+
+			var parentColumnList = GenerateColumnList<T>(parentAllPropertiesExceptKeyAndComputed, adapter);
+			var parentParameterList = GenerateParameterList<T>(parentAllPropertiesExceptKeyAndComputed);
+
+			long id = adapter.Insert(connection, transaction, commandTimeout, parentName, parentColumnList, parentParameterList, parentKeyProperties, entityToInsert);
+
+			#endregion
+
+
+			#region Insert the child class
+
+			var name = GetTableName(type);
+			var allProperties = TypePropertiesCache(type);
+			//Child class shouldn't have a Key directly, it is inherited from the parent and needs to be inserted here
+			var computedProperties = ComputedPropertiesCache(type);
+			var allPropertiesIncludingKeyExceptComputed = allProperties.Except(computedProperties).ToArray();
+
+			var columnList = GenerateColumnList<T>(allPropertiesIncludingKeyExceptComputed, adapter);
+			var parameterList = GenerateParameterList<T>(allPropertiesIncludingKeyExceptComputed);
+
+			adapter.Insert(connection, transaction, commandTimeout, name, columnList, parameterList, Enumerable.Empty<PropertyInfo>(), entityToInsert);
+
+			#endregion
+
 			return id;
 		}
 
@@ -255,6 +343,16 @@ namespace Dapper.Contrib.Extensions
 
 			var type = typeof(T);
 
+			var res = PerformUpdate(connection, entityToUpdate, transaction, commandTimeout, type, adapter);
+
+			if (TypeIsTablePerType(type))
+				res |= PerformUpdate(connection, entityToUpdate, transaction, commandTimeout, type.BaseType, adapter);
+
+			return res;
+		}
+
+		private static bool PerformUpdate(IDbConnection connection, object entityToUpdate, IDbTransaction transaction, int? commandTimeout, Type type, ISqlAdapter adapter)
+		{
 			var keyProperties = KeyPropertiesCache(type).Concat(ManualKeyPropertiesCache(type));
 			if (!keyProperties.Any())
 				throw new DataException("Entity must have at least one [Key] or [ManualKey] property");
@@ -300,11 +398,21 @@ namespace Dapper.Contrib.Extensions
 
 			var type = typeof(T);
 
-			var keyProperties = KeyPropertiesCache(type);
+			var res = PerformDelete(connection, entityToDelete, transaction, commandTimeout, type);
+
+			if (TypeIsTablePerType(type))
+				res |= PerformDelete(connection, entityToDelete, transaction, commandTimeout, type.BaseType);
+
+			return res;
+		}
+
+		private static bool PerformDelete(IDbConnection connection, object entityToDelete, IDbTransaction transaction, int? commandTimeout, Type type)
+		{
+			var name = GetTableName(type);
+
+			var keyProperties = KeyPropertiesCache(type).Concat(ManualKeyPropertiesCache(type));
 			if (keyProperties.Count() == 0)
 				throw new ArgumentException("Entity must have at least one [Key] property");
-
-			var name = GetTableName(type);
 
 			var sb = new StringBuilder();
 			sb.AppendFormat("delete from {0} where ", name);
@@ -500,7 +608,19 @@ namespace Dapper.Contrib.Extensions
 				typeBuilder.DefineMethodOverride(currGetPropMthdBldr, getMethod);
 				typeBuilder.DefineMethodOverride(currSetPropMthdBldr, setMethod);
 			}
+		}
 
+		private class NameOnlyPropertyComparer : IEqualityComparer<PropertyInfo>
+		{
+			public bool Equals(PropertyInfo x, PropertyInfo y)
+			{
+				return x.Name == y.Name;
+			}
+
+			public int GetHashCode(PropertyInfo obj)
+			{
+				return obj.Name.GetHashCode();
+			}
 		}
 	}
 
@@ -540,6 +660,15 @@ namespace Dapper.Contrib.Extensions
 
 	[AttributeUsage(AttributeTargets.Property)]
 	public class ComputedAttribute : Attribute
+	{
+	}
+
+	/// <summary>
+	/// Place on the child class of a Table Per Class inheritance object to make SqlMapperExtensions split it over multiple tables
+	/// http://weblogs.asp.net/manavi/inheritance-mapping-strategies-with-entity-framework-code-first-ctp5-part-2-table-per-type-tpt
+	/// </summary>
+	[AttributeUsage(AttributeTargets.Class)]
+	public class TablePerTypeAttribute : Attribute
 	{
 	}
 }
