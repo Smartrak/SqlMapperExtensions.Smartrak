@@ -255,9 +255,9 @@ namespace Dapper.Contrib.Extensions
 
 			var type = typeof(T);
 
-			var keyProperties = KeyPropertiesCache(type);
+			var keyProperties = KeyPropertiesCache(type).Concat(ManualKeyPropertiesCache(type));
 			if (!keyProperties.Any())
-				throw new ArgumentException("Entity must have at least one [Key] property");
+				throw new DataException("Entity must have at least one [Key] or [ManualKey] property");
 
 			var name = GetTableName(type);
 
