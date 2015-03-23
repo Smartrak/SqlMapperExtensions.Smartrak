@@ -346,7 +346,7 @@ namespace Dapper.Contrib.Extensions
 			var res = PerformUpdate(connection, entityToUpdate, transaction, commandTimeout, type, adapter);
 
 			if (TypeIsTablePerType(type))
-				res |= PerformUpdate(connection, entityToUpdate, transaction, commandTimeout, type.BaseType, adapter);
+				res &= PerformUpdate(connection, entityToUpdate, transaction, commandTimeout, type.BaseType, adapter);
 
 			return res;
 		}
@@ -401,7 +401,7 @@ namespace Dapper.Contrib.Extensions
 			var res = PerformDelete(connection, entityToDelete, transaction, commandTimeout, type);
 
 			if (TypeIsTablePerType(type))
-				res |= PerformDelete(connection, entityToDelete, transaction, commandTimeout, type.BaseType);
+				res &= PerformDelete(connection, entityToDelete, transaction, commandTimeout, type.BaseType);
 
 			return res;
 		}
