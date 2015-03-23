@@ -57,14 +57,14 @@ namespace Dapper.Contrib.Extensions
 			var allProperties = TypePropertiesCache(type);
 			var keyProperties = allProperties.Where(p => p.GetCustomAttributes(true).Any(a => a is KeyAttribute)).ToList();
 
-			if (keyProperties.Count == 0)
-			{
-				var idProp = allProperties.Where(p => p.Name.ToLower() == "id").FirstOrDefault();
-				if (idProp != null)
-				{
-					keyProperties.Add(idProp);
-				}
-			}
+			//if (keyProperties.Count == 0)
+			//{
+			//	var idProp = allProperties.Where(p => p.Name.ToLower() == "id").FirstOrDefault();
+			//	if (idProp != null)
+			//	{
+			//		keyProperties.Add(idProp);
+			//	}
+			//}
 
 			KeyProperties[type.TypeHandle] = keyProperties;
 			return keyProperties;
