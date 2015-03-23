@@ -22,6 +22,7 @@ namespace Dapper.Contrib.Extensions
 		}
 
 		private static readonly ConcurrentDictionary<RuntimeTypeHandle, IEnumerable<PropertyInfo>> KeyProperties = new ConcurrentDictionary<RuntimeTypeHandle, IEnumerable<PropertyInfo>>();
+		private static readonly ConcurrentDictionary<RuntimeTypeHandle, IEnumerable<PropertyInfo>> ManualKeyProperties = new ConcurrentDictionary<RuntimeTypeHandle, IEnumerable<PropertyInfo>>();
 		private static readonly ConcurrentDictionary<RuntimeTypeHandle, IEnumerable<PropertyInfo>> TypeProperties = new ConcurrentDictionary<RuntimeTypeHandle, IEnumerable<PropertyInfo>>();
 		private static readonly ConcurrentDictionary<RuntimeTypeHandle, IEnumerable<PropertyInfo>> ComputedProperties = new ConcurrentDictionary<RuntimeTypeHandle, IEnumerable<PropertyInfo>>();
 		private static readonly ConcurrentDictionary<RuntimeTypeHandle, string> GetQueries = new ConcurrentDictionary<RuntimeTypeHandle, string>();
@@ -69,6 +70,22 @@ namespace Dapper.Contrib.Extensions
 			KeyProperties[type.TypeHandle] = keyProperties;
 			return keyProperties;
 		}
+		private static IEnumerable<PropertyInfo> ManualKeyPropertiesCache(Type type)
+		{
+
+			IEnumerable<PropertyInfo> pi;
+			if (ManualKeyProperties.TryGetValue(type.TypeHandle, out pi))
+			{
+				return pi;
+			}
+
+			var allProperties = TypePropertiesCache(type);
+			var keyProperties = allProperties.Where(p => p.GetCustomAttributes(true).Any(a => a is ManualKeyAttribute)).ToList();
+
+
+			ManualKeyProperties[type.TypeHandle] = keyProperties;
+			return keyProperties;
+		}
 		private static IEnumerable<PropertyInfo> TypePropertiesCache(Type type)
 		{
 			IEnumerable<PropertyInfo> pis;
@@ -112,7 +129,14 @@ namespace Dapper.Contrib.Extensions
 				if (keys.Count() > 1)
 					throw new DataException("Get<T> only supports an entity with a single [Key] property");
 				if (keys.Count() == 0)
-					throw new DataException("Get<T> only supports en entity with a [Key] property");
+				{
+					keys = ManualKeyPropertiesCache(type);
+
+					if (keys.Count() > 1)
+						throw new DataException("Get<T> only supports an entity with a single [ManualKey] property");
+					if (keys.Count() == 0)
+						throw new DataException("Get<T> only supports en entity with a [Key] or [ManualKey] property");
+				}
 
 				var onlyKey = keys.First();
 
@@ -493,6 +517,14 @@ namespace Dapper.Contrib.Extensions
 	// do not want to depend on data annotations that is not in client profile
 	[AttributeUsage(AttributeTargets.Property)]
 	public class KeyAttribute : Attribute
+	{
+	}
+
+	/// <summary>
+	/// Like Key, but will be inserted with an insert.
+	/// </summary>
+	[AttributeUsage(AttributeTargets.Property)]
+	public class ManualKeyAttribute : Attribute
 	{
 	}
 
