@@ -222,6 +222,7 @@ namespace Dapper.Contrib.Extensions
 		/// <returns>true if updated, false if not found or not modified (tracked entities)</returns>
 		public static bool Update<T>(this IDbConnection connection, T entityToUpdate, IDbTransaction transaction = null, int? commandTimeout = null) where T : class
 		{
+			ISqlAdapter adapter = GetFormatter(connection);
 			var proxy = entityToUpdate as IProxy;
 			if (proxy != null)
 			{
@@ -245,7 +246,7 @@ namespace Dapper.Contrib.Extensions
 			for (var i = 0; i < nonIdProps.Count(); i++)
 			{
 				var property = nonIdProps.ElementAt(i);
-				sb.AppendFormat("{0} = @{1}", property.Name, property.Name);
+				sb.AppendFormat("{1}{0}{1} = @{0}", property.Name, adapter.ColumnNameIndicator);
 				if (i < nonIdProps.Count() - 1)
 					sb.AppendFormat(", ");
 			}
