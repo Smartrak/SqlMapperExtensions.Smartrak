@@ -353,7 +353,7 @@ namespace Dapper.Contrib.Extensions
 
 		private static bool PerformUpdate(IDbConnection connection, object entityToUpdate, IDbTransaction transaction, int? commandTimeout, Type type, ISqlAdapter adapter)
 		{
-			var keyProperties = KeyPropertiesCache(type).Concat(ManualKeyPropertiesCache(type));
+			var keyProperties = KeyPropertiesCache(type).Concat(ManualKeyPropertiesCache(type)).ToArray();
 			if (!keyProperties.Any())
 				throw new DataException("Entity must have at least one [Key] or [ManualKey] property");
 
@@ -363,7 +363,10 @@ namespace Dapper.Contrib.Extensions
 			sb.AppendFormat("update {0} set ", name);
 
 			var allProperties = TypePropertiesCache(type);
-			var nonIdProps = allProperties.Where(a => !keyProperties.Contains(a));
+			var nonIdProps = allProperties.Where(a => !keyProperties.Contains(a)).ToArray();
+
+			if (!nonIdProps.Any())
+				return true;
 
 			for (var i = 0; i < nonIdProps.Count(); i++)
 			{
@@ -400,7 +403,8 @@ namespace Dapper.Contrib.Extensions
 
 			var res = PerformDelete(connection, entityToDelete, transaction, commandTimeout, type);
 
-			if (TypeIsTablePerType(type))
+			//There may be a cascade relationship here, type REFERENCES basetype, so don't delete from basetype if there isn't any in type
+			if (res && TypeIsTablePerType(type))
 				res &= PerformDelete(connection, entityToDelete, transaction, commandTimeout, type.BaseType);
 
 			return res;
